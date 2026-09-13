@@ -12,6 +12,7 @@
 - Q: How should 'team' be defined for document sharing and Team Lead visibility? → A: Project-based — a "team" is the set of members on a given Project (via `ProjectMember`).
 - Q: What should 'virus/malware scanning' mean in this offline training environment? → A: Stub scan — a pluggable `IVirusScanner` interface with a local no-op/always-clean stub implementation, documented as a training placeholder for a real AV integration.
 - Q: Should there be a limit on tags per document and tag length? → A: Yes — up to 10 tags per document, 50 characters max per tag.
+- Q: Should virus scanning block the upload response, or run as a background job? → A: Background job — scanning runs asynchronously after the file/record is saved, using an in-process background job queue (documented as a training stand-in for a future Azure Functions + Queue Storage design); the document is not visible to anyone but the uploader until scanning completes, and the uploader sees a "Scanning" status in the interim.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -25,9 +26,11 @@ An employee uploads a work-related file (e.g., a project report) and provides a 
 
 **Acceptance Scenarios**:
 
-1. **Given** a logged-in employee on the document upload screen, **When** they select a valid PDF under 25 MB, enter a title, and choose a category, **Then** the system uploads the file, shows a progress indicator, and displays a success message with the document listed in their documents.
+1. **Given** a logged-in employee on the document upload screen, **When** they select a valid PDF under 25 MB, enter a title, and choose a category, **Then** the system uploads the file, shows a progress indicator, and displays a success message with the document listed in their documents showing a "Scanning" status.
 2. **Given** a user uploading a file, **When** the file exceeds 25 MB or is an unsupported type, **Then** the system rejects the upload and shows a clear error message without creating a document record.
 3. **Given** a user uploading a file, **When** the upload completes, **Then** the system automatically records upload date/time, uploader name, file size, and file type alongside the user-provided metadata.
+4. **Given** a document in "Scanning" status, **When** the background scan completes and reports the file clean, **Then** the document's status updates to available and it becomes visible to anyone else with permission (e.g., other project members).
+5. **Given** a document in "Scanning" status, **When** the background scan reports the file as infected, **Then** the document and its stored file are removed and the uploader is shown an error/notification explaining the rejection.
 
 ---
 
@@ -68,7 +71,8 @@ A document owner edits metadata, replaces a file version, deletes a document the
 ### Edge Cases
 
 - What happens when a user attempts to upload a file with a disguised/mismatched extension (e.g., an executable renamed to `.pdf`)? System MUST validate actual content/type against the whitelist, not just the file extension.
-- What happens when a file fails the virus/malware scan? Upload MUST be rejected, no document record created, and the user shown a clear error message.
+- What happens when a file fails the virus/malware scan? The document MUST be removed (file and record) once the background scan reports it infected, and the uploader MUST be shown a clear error/notification; the document MUST NOT have been visible to anyone else during the brief "Scanning" window.
+- What happens when a user tries to download, preview, share, or view a document that is still "Scanning" or was rejected as infected? System MUST deny access to everyone except the uploader (who sees status only, not a downloadable file while Scanning).
 - What happens when a file save to disk succeeds but the database write fails (or vice versa)? System MUST avoid orphaned files or orphaned database records (see FR-018).
 - What happens when a user without project membership tries to access a project's documents directly (e.g., via a guessed URL/ID)? System MUST deny access (IDOR protection) and log the attempt.
 - What happens when two users try to edit/replace the same document concurrently? System MUST apply the most recent write and avoid data corruption; no merge conflict UI is required for this release.
@@ -85,7 +89,8 @@ A document owner edits metadata, replaces a file version, deletes a document the
 - **FR-003**: System MUST display upload progress and a success or error message upon completion.
 - **FR-004**: System MUST require title and category on upload, and accept optional description, associated project, and tags (up to 10 tags per document, 50 characters max per tag).
 - **FR-005**: System MUST automatically capture upload date/time, uploading user, file size, and file type (MIME type) for every uploaded document.
-- **FR-006**: System MUST scan every uploaded file for viruses/malware before it is persisted, and MUST reject infected files. In this offline training environment, scanning MUST be implemented behind a pluggable `IVirusScanner`-style abstraction with a local stub implementation that always reports files as clean, explicitly documented as a placeholder for a real antivirus engine in production.
+- **FR-006**: System MUST scan every uploaded file for viruses/malware and MUST remove (file + record) any file reported as infected. Scanning runs as an asynchronous background job after the file and its metadata record are saved (status starts as "Scanning"), rather than blocking the upload response. In this offline training environment, both the scan itself and the background job mechanism are implemented behind pluggable abstractions (`IVirusScanner`, and an in-process background job queue) with local, non-networked implementations that always report files clean, explicitly documented as a placeholder for a real antivirus engine and a real Azure Functions + Queue Storage-based pipeline in production.
+- **FR-006a**: System MUST NOT expose a document to any user other than its uploader while it is in "Scanning" status, and MUST NOT allow download/preview/sharing of a document until scanning completes successfully.
 - **FR-007**: System MUST validate uploaded file extensions/content against an allow-list before saving, rejecting anything not on the list.
 - **FR-008**: System MUST store uploaded files outside of any publicly web-accessible directory and MUST require an authorized request to retrieve a file (no direct static-file access).
 - **FR-009**: System MUST generate a non-guessable, system-assigned identifier for each stored file and MUST NOT use user-supplied file names in the storage path.
@@ -97,7 +102,7 @@ A document owner edits metadata, replaces a file version, deletes a document the
 - **FR-015**: Users MUST be able to preview PDF and image documents directly in the browser without a full download.
 - **FR-016**: Document owners MUST be able to edit a document's title, description, category, and tags.
 - **FR-017**: Document owners MUST be able to replace the underlying file of a document with an updated version, retaining the same document record and metadata history.
-- **FR-018**: System MUST generate the file's storage location before writing the file and MUST only create/update the database record after the file is successfully saved, preventing orphaned records or duplicate-key errors.
+- **FR-018**: System MUST generate the file's storage location before writing the file and MUST only create/update the database record after the file is successfully saved, preventing orphaned records or duplicate-key errors. The document record is created in "Scanning" status at this point and transitions to available/removed once the background scan completes (see FR-006, FR-006a).
 - **FR-019**: Document owners MUST be able to delete documents they uploaded; Project Managers MUST be able to delete any document within projects they manage; deletion MUST require user confirmation and MUST be permanent (no recovery/trash).
 - **FR-020**: Document owners MUST be able to share a document with specific individual users or teams, where a "team" is defined as the members of a given Project.
 - **FR-021**: System MUST send an in-app notification to each recipient when a document is shared with them, and MUST list shared documents in the recipient's "Shared with Me" section.
@@ -111,7 +116,7 @@ A document owner edits metadata, replaces a file version, deletes a document the
 
 ### Key Entities
 
-- **Document**: Represents an uploaded file's metadata — title, description, category (one of a fixed set: Project Documents, Team Resources, Personal Files, Reports, Presentations, Other), tags, associated project (optional), uploader, upload date/time, file size, file type, and a reference to the stored file content. Belongs to one uploader and optionally one project.
+- **Document**: Represents an uploaded file's metadata — title, description, category (one of a fixed set: Project Documents, Team Resources, Personal Files, Reports, Presentations, Other), tags, associated project (optional), uploader, upload date/time, file size, file type, a scan status (Scanning, Clean/Available, Infected-Rejected), and a reference to the stored file content. Belongs to one uploader and optionally one project.
 - **DocumentShare**: Represents a sharing relationship between a Document and a recipient user or team, including who shared it and when, used to drive notifications and the "Shared with Me" view.
 - **Document Activity Log Entry**: Represents an audited action (upload, download, delete, share) against a Document, including which user performed it and when, used for audit/reporting.
 
