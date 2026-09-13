@@ -113,6 +113,27 @@ function Get-FeaturePathsEnv {
     }
 }
 
+function Resolve-TemplateContent {
+    param(
+        [Parameter(Mandatory = $true)][string]$TemplateName,
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    # Project-level override takes precedence over the core template shipped in .specify/templates.
+    $overridePath = Join-Path $RepoRoot ".specify/templates/overrides/$TemplateName.md"
+    $corePath = Join-Path $RepoRoot ".specify/templates/$TemplateName.md"
+
+    if (Test-Path -Path $overridePath -PathType Leaf) {
+        return Get-Content -Path $overridePath -Raw
+    }
+
+    if (Test-Path -Path $corePath -PathType Leaf) {
+        return Get-Content -Path $corePath -Raw
+    }
+
+    return $null
+}
+
 function Test-FileExists {
     param([string]$Path, [string]$Description)
     if (Test-Path -Path $Path -PathType Leaf) {
