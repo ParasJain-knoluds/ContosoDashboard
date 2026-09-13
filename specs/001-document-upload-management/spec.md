@@ -5,6 +5,14 @@
 **Status**: Draft
 **Input**: User description: "Document upload and management feature enabling employees to upload work-related documents, organize them by category and project, and share them with team members" (source: StakeholderDocs/document-upload-and-management-feature.md)
 
+## Clarifications
+
+### Session 2026-09-13
+
+- Q: How should 'team' be defined for document sharing and Team Lead visibility? → A: Project-based — a "team" is the set of members on a given Project (via `ProjectMember`).
+- Q: What should 'virus/malware scanning' mean in this offline training environment? → A: Stub scan — a pluggable `IVirusScanner` interface with a local no-op/always-clean stub implementation, documented as a training placeholder for a real AV integration.
+- Q: Should there be a limit on tags per document and tag length? → A: Yes — up to 10 tags per document, 50 characters max per tag.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Upload and Categorize a Document (Priority: P1)
@@ -75,9 +83,9 @@ A document owner edits metadata, replaces a file version, deletes a document the
 - **FR-001**: System MUST allow users to upload one or more files of type PDF, Microsoft Word/Excel/PowerPoint, plain text, JPEG, or PNG, up to 25 MB per file.
 - **FR-002**: System MUST reject uploads exceeding the size limit or of an unsupported type, with a clear, specific error message.
 - **FR-003**: System MUST display upload progress and a success or error message upon completion.
-- **FR-004**: System MUST require title and category on upload, and accept optional description, associated project, and tags.
+- **FR-004**: System MUST require title and category on upload, and accept optional description, associated project, and tags (up to 10 tags per document, 50 characters max per tag).
 - **FR-005**: System MUST automatically capture upload date/time, uploading user, file size, and file type (MIME type) for every uploaded document.
-- **FR-006**: System MUST scan every uploaded file for viruses/malware before it is persisted, and MUST reject infected files.
+- **FR-006**: System MUST scan every uploaded file for viruses/malware before it is persisted, and MUST reject infected files. In this offline training environment, scanning MUST be implemented behind a pluggable `IVirusScanner`-style abstraction with a local stub implementation that always reports files as clean, explicitly documented as a placeholder for a real antivirus engine in production.
 - **FR-007**: System MUST validate uploaded file extensions/content against an allow-list before saving, rejecting anything not on the list.
 - **FR-008**: System MUST store uploaded files outside of any publicly web-accessible directory and MUST require an authorized request to retrieve a file (no direct static-file access).
 - **FR-009**: System MUST generate a non-guessable, system-assigned identifier for each stored file and MUST NOT use user-supplied file names in the storage path.
@@ -91,12 +99,12 @@ A document owner edits metadata, replaces a file version, deletes a document the
 - **FR-017**: Document owners MUST be able to replace the underlying file of a document with an updated version, retaining the same document record and metadata history.
 - **FR-018**: System MUST generate the file's storage location before writing the file and MUST only create/update the database record after the file is successfully saved, preventing orphaned records or duplicate-key errors.
 - **FR-019**: Document owners MUST be able to delete documents they uploaded; Project Managers MUST be able to delete any document within projects they manage; deletion MUST require user confirmation and MUST be permanent (no recovery/trash).
-- **FR-020**: Document owners MUST be able to share a document with specific individual users or teams.
+- **FR-020**: Document owners MUST be able to share a document with specific individual users or teams, where a "team" is defined as the members of a given Project.
 - **FR-021**: System MUST send an in-app notification to each recipient when a document is shared with them, and MUST list shared documents in the recipient's "Shared with Me" section.
 - **FR-022**: System MUST allow attaching existing documents to a task and uploading a new document directly from a task detail page; documents attached to a task MUST automatically be associated with that task's project.
 - **FR-023**: System MUST display a "Recent Documents" widget on the dashboard home page showing the current user's last 5 uploaded documents, and MUST display a document count in the dashboard summary.
 - **FR-024**: System MUST notify a user when a new document is added to a project they are a member of.
-- **FR-025**: System MUST enforce role-based access so that Employees manage their own and assigned-project documents, Team Leads additionally view/manage their team's documents, Project Managers manage all documents in projects they manage, and Administrators have full access to all documents.
+- **FR-025**: System MUST enforce role-based access so that Employees manage their own and assigned-project documents, Team Leads additionally view/manage documents belonging to members of projects they participate in, Project Managers manage all documents in projects they manage, and Administrators have full access to all documents.
 - **FR-026**: System MUST log all document-related activities (uploads, downloads, deletions, share actions) for audit purposes.
 - **FR-027**: Administrators MUST be able to generate reports on most-uploaded document types, most active uploaders, and document access patterns.
 - **FR-028**: System MUST prevent unauthorized access to documents via direct reference/ID manipulation (IDOR protection), enforcing authorization checks on every document access, download, and preview request.
