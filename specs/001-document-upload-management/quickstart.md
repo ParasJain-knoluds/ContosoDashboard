@@ -14,12 +14,13 @@ dotnet build
 dotnet run
 ```
 
-The app starts with SQLite (`ContosoDashboard.db`). If schema changes were made for `Document`,
-`DocumentShare`, `DocumentActivityLog`, ensure EF Core migrations have been applied (or the dev
-database has been recreated) before testing:
+The app starts with SQLite (`ContosoDashboard.db`). This project has no EF Core migration history —
+schema is created via `Database.EnsureCreated()` on startup. If `Document`, `DocumentShare`, or
+`DocumentActivityLog` schema changes were made, delete the local dev database file so it is
+recreated with the new schema on next run:
 
 ```powershell
-dotnet ef database update
+Remove-Item ContosoDashboard.db -ErrorAction SilentlyContinue
 ```
 
 Log in via `/login` using one of the mock users (e.g., `camille.nicole@contoso.com` — Project Manager).

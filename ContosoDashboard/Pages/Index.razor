@@ -5,6 +5,7 @@
 @attribute [Authorize]
 @inject IDashboardService DashboardService
 @inject INotificationService NotificationService
+@inject IDocumentService DocumentService
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Dashboard - ContosoDashboard</PageTitle>
@@ -52,6 +53,14 @@
                     </div>
                 </div>
             </div>
+            <div class="col-md-3 mb-3">
+                <div class="card summary-card">
+                    <div class="card-body">
+                        <h5 class="card-title">My Documents</h5>
+                        <p class="card-text display-4 text-secondary">@documentCount</p>
+                    </div>
+                </div>
+            </div>
         </div>
     }
 
@@ -89,6 +98,9 @@
                 <a href="/notifications" class="list-group-item list-group-item-action">
                     <i class="bi bi-bell"></i> View Notifications
                 </a>
+                <a href="/documents" class="list-group-item list-group-item-action">
+                    <i class="bi bi-file-earmark-text"></i> View Documents
+                </a>
                 <a href="/profile" class="list-group-item list-group-item-action">
                     <i class="bi bi-person"></i> Edit Profile
                 </a>
@@ -118,12 +130,40 @@
             }
         </div>
     </div>
+
+    @if (recentDocuments != null && recentDocuments.Any())
+    {
+        <div class="row mt-4">
+            <div class="col">
+                <h3>Recent Documents</h3>
+                <div class="list-group">
+                    @foreach (var document in recentDocuments)
+                    {
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>@document.Title</strong>
+                                <small class="text-muted d-block">@document.Category &middot; @document.UploadedDate.ToString("MMM dd, yyyy")</small>
+                            </div>
+                            @if (document.ScanStatus == Models.DocumentScanStatuses.Available)
+                            {
+                                <a class="btn btn-sm btn-outline-primary" href="/documents/download/@document.DocumentId" target="_blank">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
 </div>
 
 @code {
     private DashboardSummary? summary;
     private List<Announcement>? announcements;
     private List<Notification>? recentNotifications;
+    private List<Document>? recentDocuments;
+    private int documentCount;
     private string userName = "User";
     private int currentUserId = 0;
 
@@ -146,6 +186,9 @@
             summary = await DashboardService.GetDashboardSummaryAsync(currentUserId);
             announcements = await DashboardService.GetActiveAnnouncementsAsync();
             recentNotifications = await NotificationService.GetUserNotificationsAsync(currentUserId);
+            recentDocuments = await DocumentService.GetMyDocumentsAsync(currentUserId);
+            recentDocuments = recentDocuments.Take(5).ToList();
+            documentCount = await DocumentService.GetDocumentCountAsync(currentUserId);
         }
     }
 

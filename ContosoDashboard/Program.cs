@@ -43,6 +43,13 @@ builder.Services.AddScoped<ITaskService, TaskService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
+builder.Services.AddScoped<IDocumentService, DocumentService>();
+
+// Register document storage/scan pipeline (local, offline stand-ins for future Azure services)
+builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
+builder.Services.AddSingleton<IVirusScanner, StubVirusScanner>();
+builder.Services.AddSingleton<IScanQueue, ScanQueue>();
+builder.Services.AddHostedService<VirusScanBackgroundService>();
 
 // Add HttpContextAccessor for accessing user claims
 builder.Services.AddHttpContextAccessor();

@@ -2,9 +2,11 @@
 @using ContosoDashboard.Services
 @using ContosoDashboard.Models
 @using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
 @using System.Security.Claims
 @attribute [Authorize]
 @inject ITaskService TaskService
+@inject IDocumentService DocumentService
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>My Tasks - ContosoDashboard</PageTitle>
@@ -126,6 +128,9 @@
                                 <button class="btn btn-sm btn-outline-primary" @onclick="() => ViewTaskDetails(task.TaskId)">
                                     <i class="bi bi-eye"></i>
                                 </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenDocumentsPanel(task)">
+                                    <i class="bi bi-paperclip"></i> Documents
+                                </button>
                             </td>
                         </tr>
                     }
@@ -135,11 +140,125 @@
     }
 </div>
 
+@if (selectedTaskForDocuments != null)
+{
+    <div class="modal d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Documents for "@selectedTaskForDocuments.Title"</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDocumentsPanel"></button>
+                </div>
+                <div class="modal-body">
+                    @if (selectedTaskForDocuments.ProjectId == null)
+                    {
+                        <div class="alert alert-info">This task has no project; uploaded documents will be personal files.</div>
+                    }
+
+                    <h6>Project Documents</h6>
+                    @if (taskProjectDocuments == null || !taskProjectDocuments.Any())
+                    {
+                        <p class="text-muted">No documents associated with this task's project yet.</p>
+                    }
+                    else
+                    {
+                        <ul class="list-group mb-3">
+                            @foreach (var document in taskProjectDocuments)
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    @document.Title
+                                    @if (document.ScanStatus == DocumentScanStatuses.Available)
+                                    {
+                                        <a class="btn btn-sm btn-outline-primary" href="/documents/download/@document.DocumentId" target="_blank">
+                                            <i class="bi bi-download"></i>
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-warning">Scanning</span>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    }
+
+                    <hr />
+                    <h6>Upload a New Document</h6>
+                    @if (!string.IsNullOrEmpty(docUploadError))
+                    {
+                        <div class="alert alert-danger">@docUploadError</div>
+                    }
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-5">
+                            <input class="form-control" placeholder="Title" @bind="docUploadTitle" />
+                        </div>
+                        <div class="col-md-4">
+                            <select class="form-select" @bind="docUploadCategory">
+                                @foreach (var category in DocumentCategories.All)
+                                {
+                                    <option value="@category">@category</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <InputFile class="form-control" OnChange="OnDocUploadFileSelected" />
+                        </div>
+                    </div>
+                    <button class="btn btn-primary mb-4" disabled="@isDocUploading" @onclick="UploadTaskDocumentAsync">
+                        @(isDocUploading ? "Uploading..." : "Upload")
+                    </button>
+
+                    @if (selectedTaskForDocuments.ProjectId != null)
+                    {
+                        <hr />
+                        <h6>Attach an Existing Personal Document</h6>
+                        @if (!string.IsNullOrEmpty(attachError))
+                        {
+                            <div class="alert alert-danger">@attachError</div>
+                        }
+                        @if (myPersonalDocuments == null || !myPersonalDocuments.Any())
+                        {
+                            <p class="text-muted">You have no personal documents available to attach.</p>
+                        }
+                        else
+                        {
+                            <div class="input-group">
+                                <select class="form-select" @bind="attachDocumentId">
+                                    <option value="">-- Select document --</option>
+                                    @foreach (var document in myPersonalDocuments)
+                                    {
+                                        <option value="@document.DocumentId">@document.Title</option>
+                                    }
+                                </select>
+                                <button class="btn btn-outline-primary" @onclick="AttachExistingDocumentAsync">Attach</button>
+                            </div>
+                        }
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseDocumentsPanel">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<TaskItem>? tasks;
     private string filterStatus = "";
     private string filterPriority = "";
     private int currentUserId = 0;
+
+    private TaskItem? selectedTaskForDocuments;
+    private List<Document>? taskProjectDocuments;
+    private List<Document>? myPersonalDocuments;
+    private string docUploadTitle = "";
+    private string docUploadCategory = DocumentCategories.Other;
+    private IBrowserFile? docUploadFile;
+    private string? docUploadError;
+    private bool isDocUploading;
+    private int? attachDocumentId;
+    private string? attachError;
 
     protected override async Task OnInitializedAsync()
     {
@@ -188,6 +307,107 @@
     private void ViewTaskDetails(int taskId)
     {
         // TODO: Navigate to task details or show modal
+    }
+
+    private async Task OpenDocumentsPanel(TaskItem task)
+    {
+        selectedTaskForDocuments = task;
+        docUploadError = null;
+        attachError = null;
+        attachDocumentId = null;
+        docUploadTitle = "";
+        docUploadFile = null;
+
+        taskProjectDocuments = task.ProjectId.HasValue
+            ? await DocumentService.GetProjectDocumentsAsync(task.ProjectId.Value, currentUserId)
+            : new List<Document>();
+
+        var myDocuments = await DocumentService.GetMyDocumentsAsync(currentUserId);
+        myPersonalDocuments = myDocuments.Where(d => d.ProjectId == null).ToList();
+    }
+
+    private void CloseDocumentsPanel()
+    {
+        selectedTaskForDocuments = null;
+    }
+
+    private void OnDocUploadFileSelected(InputFileChangeEventArgs e)
+    {
+        docUploadFile = e.File;
+    }
+
+    private async Task UploadTaskDocumentAsync()
+    {
+        if (selectedTaskForDocuments == null)
+        {
+            return;
+        }
+
+        if (docUploadFile == null)
+        {
+            docUploadError = "Please choose a file.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(docUploadTitle))
+        {
+            docUploadError = "Title is required.";
+            return;
+        }
+
+        isDocUploading = true;
+        docUploadError = null;
+        try
+        {
+            const long maxUploadBytes = 25 * 1024 * 1024;
+            await using var browserStream = docUploadFile.OpenReadStream(maxUploadBytes);
+            using var buffer = new MemoryStream();
+            await browserStream.CopyToAsync(buffer);
+            buffer.Position = 0;
+
+            var request = new UploadDocumentRequest
+            {
+                Title = docUploadTitle,
+                Category = docUploadCategory,
+                ProjectId = selectedTaskForDocuments.ProjectId,
+                FileStream = buffer,
+                OriginalFileName = docUploadFile.Name,
+                ContentType = string.IsNullOrWhiteSpace(docUploadFile.ContentType) ? "application/octet-stream" : docUploadFile.ContentType,
+                FileSizeBytes = docUploadFile.Size
+            };
+
+            await DocumentService.UploadAsync(request, currentUserId);
+            docUploadTitle = "";
+            docUploadFile = null;
+            await OpenDocumentsPanel(selectedTaskForDocuments);
+        }
+        catch (Exception ex)
+        {
+            docUploadError = ex.Message;
+        }
+        finally
+        {
+            isDocUploading = false;
+        }
+    }
+
+    private async Task AttachExistingDocumentAsync()
+    {
+        if (selectedTaskForDocuments?.ProjectId == null || attachDocumentId == null)
+        {
+            attachError = "This task has no project to attach documents to.";
+            return;
+        }
+
+        var success = await DocumentService.AttachToProjectAsync(attachDocumentId.Value, selectedTaskForDocuments.ProjectId.Value, currentUserId);
+        if (!success)
+        {
+            attachError = "Unable to attach this document.";
+            return;
+        }
+
+        attachDocumentId = null;
+        await OpenDocumentsPanel(selectedTaskForDocuments);
     }
 
     private string GetPriorityColor(TaskPriority priority)
