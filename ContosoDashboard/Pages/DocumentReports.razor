@@ -1,0 +1,131 @@
+@page "/admin/document-reports"
+@using ContosoDashboard.Services
+@using ContosoDashboard.Models
+@using Microsoft.AspNetCore.Authorization
+@using System.Security.Claims
+@attribute [Authorize(Roles = "Administrator")]
+@inject IDocumentService DocumentService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Document Reports - ContosoDashboard</PageTitle>
+
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col">
+            <h1>Document Reports</h1>
+            <p class="text-muted">Administrator-only usage and audit reporting.</p>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Most Uploaded Document Types</h5>
+                </div>
+                <div class="card-body">
+                    @if (typeCounts == null || !typeCounts.Any())
+                    {
+                        <p class="text-muted">No data available.</p>
+                    }
+                    else
+                    {
+                        <table class="table table-sm">
+                            <thead><tr><th>Document Type</th><th>Count</th></tr></thead>
+                            <tbody>
+                                @foreach (var (documentType, count) in typeCounts)
+                                {
+                                    <tr><td>@documentType</td><td>@count</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Most Active Uploaders</h5>
+                </div>
+                <div class="card-body">
+                    @if (uploaderCounts == null || !uploaderCounts.Any())
+                    {
+                        <p class="text-muted">No data available.</p>
+                    }
+                    else
+                    {
+                        <table class="table table-sm">
+                            <thead><tr><th>Uploader</th><th>Documents</th></tr></thead>
+                            <tbody>
+                                @foreach (var (uploaderName, count) in uploaderCounts)
+                                {
+                                    <tr><td>@uploaderName</td><td>@count</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Recent Document Activity (Audit Log)</h5>
+        </div>
+        <div class="card-body">
+            @if (activityLog == null || !activityLog.Any())
+            {
+                <p class="text-muted">No activity recorded.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover">
+                        <thead>
+                            <tr><th>Timestamp</th><th>Document</th><th>User</th><th>Action</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var entry in activityLog)
+                            {
+                                <tr>
+                                    <td>@entry.Timestamp.ToString("MMM dd, yyyy HH:mm")</td>
+                                    <td>@entry.Document.Title</td>
+                                    <td>@entry.User.DisplayName</td>
+                                    <td>@entry.ActionType</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private int currentUserId;
+    private List<(string DocumentType, int Count)>? typeCounts;
+    private List<(string UploaderName, int Count)>? uploaderCounts;
+    private List<DocumentActivityLog>? activityLog;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier);
+        if (userIdClaim != null && int.TryParse(userIdClaim.Value, out int userId))
+        {
+            currentUserId = userId;
+        }
+
+        if (currentUserId > 0)
+        {
+            typeCounts = await DocumentService.GetMostUploadedDocumentTypesAsync(currentUserId);
+            uploaderCounts = await DocumentService.GetMostActiveUploadersAsync(currentUserId);
+            activityLog = await DocumentService.GetDocumentAccessPatternsAsync(currentUserId);
+        }
+    }
+}

@@ -1,0 +1,602 @@
+@page "/documents"
+@using ContosoDashboard.Services
+@using ContosoDashboard.Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using System.Security.Claims
+@attribute [Authorize]
+@inject IDocumentService DocumentService
+@inject IProjectService ProjectService
+@inject IUserService UserService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Documents - ContosoDashboard</PageTitle>
+
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col">
+            <h1>Documents</h1>
+        </div>
+    </div>
+
+    <!-- Search -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="input-group">
+                <input class="form-control" placeholder="Search documents by title, description, tag, uploader or project"
+                       @bind="searchQuery" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
+                <button class="btn btn-outline-secondary" @onclick="SearchAsync">
+                    <i class="bi bi-search"></i> Search
+                </button>
+                @if (searchResults != null)
+                {
+                    <button class="btn btn-outline-secondary" @onclick="ClearSearch">Clear</button>
+                }
+            </div>
+        </div>
+    </div>
+
+    @if (searchResults != null)
+    {
+        <h5>Search Results</h5>
+        @RenderDocumentTable(searchResults, showOwnerActions: false)
+    }
+
+    <!-- Upload -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Upload a Document</h5>
+        </div>
+        <div class="card-body">
+            @if (!string.IsNullOrEmpty(uploadError))
+            {
+                <div class="alert alert-danger">@uploadError</div>
+            }
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label>Title</label>
+                    <input class="form-control" @bind="uploadTitle" />
+                </div>
+                <div class="col-md-4">
+                    <label>Category</label>
+                    <select class="form-select" @bind="uploadCategory">
+                        @foreach (var category in DocumentCategories.All)
+                        {
+                            <option value="@category">@category</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label>Project (optional)</label>
+                    <select class="form-select" @bind="uploadProjectId">
+                        <option value="">None (personal file)</option>
+                        @if (myProjects != null)
+                        {
+                            @foreach (var project in myProjects)
+                            {
+                                <option value="@project.ProjectId">@project.Name</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="col-md-8">
+                    <label>Description (optional)</label>
+                    <input class="form-control" @bind="uploadDescription" />
+                </div>
+                <div class="col-md-4">
+                    <label>Tags (comma-separated, optional)</label>
+                    <input class="form-control" @bind="uploadTagsRaw" placeholder="design, contract" />
+                </div>
+                <div class="col-md-6">
+                    <label>File (max 25 MB: pdf, doc(x), xls(x), ppt(x), txt, jpg, png)</label>
+                    <InputFile class="form-control" OnChange="OnFileSelected" />
+                </div>
+                <div class="col-md-6 d-flex align-items-end">
+                    <button class="btn btn-primary" disabled="@isUploading" @onclick="UploadDocumentAsync">
+                        @(isUploading ? "Uploading..." : "Upload")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- My Documents -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">My Documents</h5>
+        </div>
+        <div class="card-body">
+            @if (myDocuments == null)
+            {
+                <p><em>Loading...</em></p>
+            }
+            else if (!myDocuments.Any())
+            {
+                <div class="alert alert-info">You haven't uploaded any documents yet.</div>
+            }
+            else
+            {
+                @RenderDocumentTable(myDocuments, showOwnerActions: true)
+            }
+        </div>
+    </div>
+
+    <!-- Shared with Me -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Shared with Me</h5>
+        </div>
+        <div class="card-body">
+            @if (sharedDocuments == null)
+            {
+                <p><em>Loading...</em></p>
+            }
+            else if (!sharedDocuments.Any())
+            {
+                <div class="alert alert-info">No documents have been shared with you.</div>
+            }
+            else
+            {
+                @RenderDocumentTable(sharedDocuments, showOwnerActions: false)
+            }
+        </div>
+    </div>
+</div>
+
+<!-- Edit modal -->
+@if (editingDocument != null)
+{
+    <div class="modal d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Document</h5>
+                    <button type="button" class="btn-close" @onclick="() => editingDocument = null"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(editError))
+                    {
+                        <div class="alert alert-danger">@editError</div>
+                    }
+                    <div class="mb-2">
+                        <label>Title</label>
+                        <input class="form-control" @bind="editTitle" />
+                    </div>
+                    <div class="mb-2">
+                        <label>Category</label>
+                        <select class="form-select" @bind="editCategory">
+                            @foreach (var category in DocumentCategories.All)
+                            {
+                                <option value="@category">@category</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label>Description</label>
+                        <input class="form-control" @bind="editDescription" />
+                    </div>
+                    <div class="mb-2">
+                        <label>Tags (comma-separated)</label>
+                        <input class="form-control" @bind="editTagsRaw" />
+                    </div>
+                    <hr />
+                    <div class="mb-2">
+                        <label>Replace file (optional)</label>
+                        <InputFile class="form-control" OnChange="OnReplaceFileSelected" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => editingDocument = null">Cancel</button>
+                    <button class="btn btn-primary" @onclick="SaveEditAsync">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Share modal -->
+@if (shareTargetDocumentId != null)
+{
+    <div class="modal d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Share Document</h5>
+                    <button type="button" class="btn-close" @onclick="() => shareTargetDocumentId = null"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(shareError))
+                    {
+                        <div class="alert alert-danger">@shareError</div>
+                    }
+                    <div class="mb-2">
+                        <label>Share with a specific person</label>
+                        <select class="form-select" @bind="shareWithUserId">
+                            <option value="">-- Select user --</option>
+                            @if (allUsers != null)
+                            {
+                                @foreach (var candidate in allUsers)
+                                {
+                                    <option value="@candidate.UserId">@candidate.DisplayName</option>
+                                }
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label>Or share with a project team</label>
+                        <select class="form-select" @bind="shareWithProjectId">
+                            <option value="">-- Select project --</option>
+                            @if (myProjects != null)
+                            {
+                                @foreach (var project in myProjects)
+                                {
+                                    <option value="@project.ProjectId">@project.Name</option>
+                                }
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => shareTargetDocumentId = null">Cancel</button>
+                    <button class="btn btn-primary" @onclick="ConfirmShareAsync">Share</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private const long MaxUploadBytes = 25 * 1024 * 1024;
+
+    private int currentUserId;
+    private List<Document>? myDocuments;
+    private List<Document>? sharedDocuments;
+    private List<Project>? myProjects;
+    private List<User>? allUsers;
+    private List<Document>? searchResults;
+    private string searchQuery = "";
+
+    private string uploadTitle = "";
+    private string uploadDescription = "";
+    private string uploadCategory = DocumentCategories.Other;
+    private int? uploadProjectId;
+    private string uploadTagsRaw = "";
+    private IBrowserFile? selectedFile;
+    private string? uploadError;
+    private bool isUploading;
+
+    private Document? editingDocument;
+    private string editTitle = "";
+    private string editDescription = "";
+    private string editCategory = DocumentCategories.Other;
+    private string editTagsRaw = "";
+    private IBrowserFile? replaceFile;
+    private string? editError;
+
+    private int? shareTargetDocumentId;
+    private int? shareWithUserId;
+    private int? shareWithProjectId;
+    private string? shareError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier);
+        if (userIdClaim != null && int.TryParse(userIdClaim.Value, out int userId))
+        {
+            currentUserId = userId;
+        }
+
+        if (currentUserId > 0)
+        {
+            await LoadAllAsync();
+        }
+    }
+
+    private async Task LoadAllAsync()
+    {
+        myDocuments = await DocumentService.GetMyDocumentsAsync(currentUserId);
+        sharedDocuments = await DocumentService.GetSharedWithMeAsync(currentUserId);
+        myProjects = await ProjectService.GetUserProjectsAsync(currentUserId);
+        allUsers = await UserService.GetAllUsersAsync();
+    }
+
+    private void OnFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+        uploadError = null;
+    }
+
+    private void OnReplaceFileSelected(InputFileChangeEventArgs e)
+    {
+        replaceFile = e.File;
+    }
+
+    private async Task UploadDocumentAsync()
+    {
+        uploadError = null;
+
+        if (selectedFile == null)
+        {
+            uploadError = "Please choose a file to upload.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(uploadTitle))
+        {
+            uploadError = "Title is required.";
+            return;
+        }
+
+        isUploading = true;
+        try
+        {
+            await using var browserStream = selectedFile.OpenReadStream(MaxUploadBytes);
+            using var buffer = new MemoryStream();
+            await browserStream.CopyToAsync(buffer);
+            buffer.Position = 0;
+
+            var tags = ParseTags(uploadTagsRaw);
+
+            var request = new UploadDocumentRequest
+            {
+                Title = uploadTitle,
+                Description = string.IsNullOrWhiteSpace(uploadDescription) ? null : uploadDescription,
+                Category = uploadCategory,
+                ProjectId = uploadProjectId,
+                Tags = tags,
+                FileStream = buffer,
+                OriginalFileName = selectedFile.Name,
+                ContentType = string.IsNullOrWhiteSpace(selectedFile.ContentType) ? "application/octet-stream" : selectedFile.ContentType,
+                FileSizeBytes = selectedFile.Size
+            };
+
+            await DocumentService.UploadAsync(request, currentUserId);
+
+            uploadTitle = "";
+            uploadDescription = "";
+            uploadTagsRaw = "";
+            uploadProjectId = null;
+            uploadCategory = DocumentCategories.Other;
+            selectedFile = null;
+
+            await LoadAllAsync();
+        }
+        catch (Exception ex)
+        {
+            uploadError = ex.Message;
+        }
+        finally
+        {
+            isUploading = false;
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        searchResults = string.IsNullOrWhiteSpace(searchQuery)
+            ? null
+            : await DocumentService.SearchAsync(searchQuery, currentUserId);
+    }
+
+    private async Task HandleSearchKeyUp(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SearchAsync();
+        }
+    }
+
+    private void ClearSearch()
+    {
+        searchQuery = "";
+        searchResults = null;
+    }
+
+    private void StartEdit(Document document)
+    {
+        editingDocument = document;
+        editTitle = document.Title;
+        editDescription = document.Description ?? "";
+        editCategory = document.Category;
+        editTagsRaw = document.Tags ?? "";
+        editError = null;
+        replaceFile = null;
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (editingDocument == null)
+        {
+            return;
+        }
+
+        editError = null;
+        try
+        {
+            if (replaceFile != null)
+            {
+                await using var browserStream = replaceFile.OpenReadStream(MaxUploadBytes);
+                using var buffer = new MemoryStream();
+                await browserStream.CopyToAsync(buffer);
+                buffer.Position = 0;
+
+                await DocumentService.ReplaceFileAsync(
+                    editingDocument.DocumentId, buffer, replaceFile.Name,
+                    string.IsNullOrWhiteSpace(replaceFile.ContentType) ? "application/octet-stream" : replaceFile.ContentType,
+                    replaceFile.Size, currentUserId);
+            }
+
+            var request = new UpdateDocumentMetadataRequest
+            {
+                Title = editTitle,
+                Description = string.IsNullOrWhiteSpace(editDescription) ? null : editDescription,
+                Category = editCategory,
+                Tags = ParseTags(editTagsRaw)
+            };
+
+            var updated = await DocumentService.UpdateMetadataAsync(editingDocument.DocumentId, request, currentUserId);
+            if (updated == null)
+            {
+                editError = "Unable to update this document.";
+                return;
+            }
+
+            editingDocument = null;
+            await LoadAllAsync();
+        }
+        catch (Exception ex)
+        {
+            editError = ex.Message;
+        }
+    }
+
+    private async Task DeleteDocumentAsync(int documentId)
+    {
+        await DocumentService.DeleteAsync(documentId, currentUserId);
+        await LoadAllAsync();
+    }
+
+    private void StartShare(int documentId)
+    {
+        shareTargetDocumentId = documentId;
+        shareWithUserId = null;
+        shareWithProjectId = null;
+        shareError = null;
+    }
+
+    private async Task ConfirmShareAsync()
+    {
+        if (shareTargetDocumentId == null)
+        {
+            return;
+        }
+
+        shareError = null;
+        try
+        {
+            var request = new ShareDocumentRequest
+            {
+                SharedWithUserId = shareWithUserId,
+                SharedWithProjectId = shareWithProjectId
+            };
+
+            var success = await DocumentService.ShareAsync(shareTargetDocumentId.Value, request, currentUserId);
+            if (!success)
+            {
+                shareError = "Choose exactly one recipient (person or project team) to share with.";
+                return;
+            }
+
+            shareTargetDocumentId = null;
+            await LoadAllAsync();
+        }
+        catch (Exception ex)
+        {
+            shareError = ex.Message;
+        }
+    }
+
+    private static List<string>? ParseTags(string raw)
+    {
+        var tags = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        return tags.Count > 0 ? tags : null;
+    }
+
+    private string GetScanStatusBadge(string status) => status switch
+    {
+        DocumentScanStatuses.Scanning => "warning",
+        DocumentScanStatuses.Available => "success",
+        DocumentScanStatuses.InfectedRemoved => "danger",
+        _ => "secondary"
+    };
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes >= 1024 * 1024)
+        {
+            return $"{bytes / (1024.0 * 1024.0):0.0} MB";
+        }
+
+        return $"{bytes / 1024.0:0.0} KB";
+    }
+
+    private RenderFragment RenderDocumentTable(List<Document> documents, bool showOwnerActions) => @<div class="table-responsive">
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Category</th>
+                    <th>Project</th>
+                    <th>Size</th>
+                    <th>Uploaded</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var document in documents)
+                {
+                    <tr>
+                        <td>
+                            <strong>@document.Title</strong>
+                            @if (!string.IsNullOrEmpty(document.Description))
+                            {
+                                <br />
+                                <small class="text-muted">@document.Description</small>
+                            }
+                            @if (!string.IsNullOrEmpty(document.Tags))
+                            {
+                                <br />
+                                @foreach (var tag in document.Tags.Split(','))
+                                {
+                                    <span class="badge bg-secondary me-1">@tag</span>
+                                }
+                            }
+                        </td>
+                        <td>@document.Category</td>
+                        <td>
+                            @if (document.Project != null)
+                            {
+                                <a href="/projects/@document.ProjectId">@document.Project.Name</a>
+                            }
+                            else
+                            {
+                                <span class="text-muted">Personal</span>
+                            }
+                        </td>
+                        <td>@FormatFileSize(document.FileSizeBytes)</td>
+                        <td>@document.UploadedDate.ToString("MMM dd, yyyy")</td>
+                        <td>
+                            <span class="badge bg-@GetScanStatusBadge(document.ScanStatus)">@document.ScanStatus</span>
+                        </td>
+                        <td>
+                            @if (document.ScanStatus == DocumentScanStatuses.Available)
+                            {
+                                <a class="btn btn-sm btn-outline-primary" href="/documents/download/@document.DocumentId" target="_blank">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                            }
+                            @if (showOwnerActions)
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => StartEdit(document)">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                @if (document.ScanStatus == DocumentScanStatuses.Available)
+                                {
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => StartShare(document.DocumentId)">
+                                        <i class="bi bi-share"></i>
+                                    </button>
+                                }
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteDocumentAsync(document.DocumentId)">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>;
+}
