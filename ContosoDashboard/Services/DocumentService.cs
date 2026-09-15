@@ -471,6 +471,14 @@ public class DocumentService : IDocumentService
             return false;
         }
 
+        _context.DocumentActivityLogs.Add(new DocumentActivityLog
+        {
+            DocumentId = document.DocumentId,
+            UserId = currentUserId,
+            ActionType = DocumentActivityActionTypes.Delete,
+            Timestamp = DateTime.UtcNow
+        });
+
         _context.Documents.Remove(document);
         await _context.SaveChangesAsync();
         await _fileStorage.DeleteAsync(document.FilePath);
